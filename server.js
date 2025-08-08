@@ -28,9 +28,12 @@ app.post('/', async (req, res) => {
       output_format: 'mp3_44100_128',
     });
 
-    // ⬇️ Convert stream to ArrayBuffer
-    const arrayBuffer = await stream.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // ✅ Convert ReadableStream to Buffer
+    const chunks = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
 
     const base64 = buffer.toString('base64');
     const audioUrl = `data:audio/mpeg;base64,${base64}`;
@@ -46,4 +49,3 @@ app.post('/', async (req, res) => {
 app.listen(port, () => {
   console.log(`Katrina voice server running on port ${port}`);
 });
-
