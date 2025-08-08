@@ -1,40 +1,43 @@
 const express = require('express')
-const axios = require('axios')
 const cors = require('cors')
+const bodyParser = require('body-parser')
+const { ElevenLabsClient } = require('elevenlabs')
 
 const app = express()
+const port = process.env.PORT || 10000
+
 app.use(cors())
-app.use(express.json())
+app.use(bodyParser.json())
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'your-voice-id'
+const elevenlabs = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY
+})
 
-app.post('/tts', async (req, res) => {
-  const text = req.body.text
-  if (!text) return res.status(400).json({ error: 'Missing text' })
+app.post('/', async (req, res) => {
+  const { text, voice } = req.body
+  if (!text) {
+    return res.status(400).json({ error: 'No text provided' })
+  }
 
   try {
-    const audioResponse = await axios.post(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-      { text, model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': ELEVENLABS_API_KEY
-        },
-        responseType: 'arraybuffer'
-      }
-    )
+    const audio = await elevenlabs.generate({
+      voice: voice || 'Rachel',
+      model_id: 'eleven_multilingual_v2',
+      text,
+      output_format: 'mp3_44100_128'
+    })
 
-    const base64Audio = Buffer.from(audioResponse.data, 'binary').toString('base64')
-    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`
+    const base64 = Buffer.from(audio).toString('base64')
+    const audioUrl = `data:audio/mpeg;base64,${base64}`
+    const audioTag = `<audio src="${audioUrl}" autoplay="true"></audio>`
 
-    return res.json({ audioUrl })
+    res.json({ audioUrl, audioTag })
   } catch (err) {
-    console.error(err.response?.data || err.message)
-    res.status(500).json({ error: 'TTS failed' })
+    console.error('❌ TTS Error:', err)
+    res.status(500).json({ error: 'TTS generation failed' })
   }
 })
 
-const port = process.env.PORT || 3000
-app.listen(port, () => console.log(`Katrina voice server running on port ${port}`))
+app.listen(port, () => {
+  console.log(`Katrina voice server running on port ${port}`)
+})
