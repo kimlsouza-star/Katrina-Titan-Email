@@ -21,7 +21,7 @@ app.post('/', async (req, res) => {
 
   try {
     const audio = await elevenlabs.generate({
-      voice: voice || 'Rachel',
+      voice: voice || 'BZgkqPqms7Kj9ulSkVzn', // Default to Eve's voice ID
       model_id: 'eleven_multilingual_v2',
       text,
       output_format: 'mp3_44100_128'
