@@ -1,46 +1,62 @@
 const express = require('express');
-const fetch = require('node-fetch');
 const cors = require('cors');
+const nodemailer = require('nodemailer');
+
+const {
+  SMTP_HOST = 'smtp.titan.email',
+  SMTP_PORT = '587',
+  SMTP_SECURE = 'false',
+  SMTP_USER,
+  SMTP_PASS,
+  FROM_EMAIL,
+  API_KEY
+} = process.env;
+
+if (!SMTP_USER || !SMTP_PASS || !FROM_EMAIL || !API_KEY) {
+  console.error('Missing required environment vars: SMTP_USER, SMTP_PASS, FROM_EMAIL, API_KEY');
+  process.exit(1);
+}
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const KATRINA_VOICE_ID = 'BZgkqPqms7Kj9ulSkVzn'; // Eve
+// simple auth middleware
+app.use((req, res, next) => {
+  const key = req.header('x-api-key');
+  if (!key || key !== API_KEY) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+});
 
-app.post('/api/tts', async (req, res) => {
+const transporter = nodemailer.createTransport({
+  host: SMTP_HOST,
+  port: Number(SMTP_PORT),
+  secure: SMTP_SECURE === 'true',
+  auth: { user: SMTP_USER, pass: SMTP_PASS }
+});
+
+app.post('/send-email', async (req, res) => {
   try {
-    const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'No text provided' });
+    const { to, subject, text, html, replyTo } = req.body || {};
+    if (!to || !subject || (!text && !html)) {
+      return res.status(400).json({ error: 'to, subject, and text or html are required' });
+    }
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${KATRINA_VOICE_ID}`, {
-      method: 'POST',
-      headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        text,
-        model_id: 'eleven_monolingual_v1',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75
-        }
-      })
+    const info = await transporter.sendMail({
+      from: FROM_EMAIL,
+      to,
+      subject,
+      text: text || undefined,
+      html: html || undefined,
+      replyTo: replyTo || undefined
     });
 
-    const audioBuffer = await response.buffer();
-    const base64Audio = audioBuffer.toString('base64');
-    const audioUrl = `data:audio/mpeg;base64,${base64Audio}`;
-    res.json({ audioUrl });
-
+    return res.json({ ok: true, messageId: info.messageId });
   } catch (err) {
-    console.error('TTS Error:', err.message);
-    res.status(500).json({ error: 'Failed to fetch audio from ElevenLabs' });
+    console.error('Email send failed:', err);
+    return res.status(500).json({ ok: false, error: 'SEND_FAILED' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Katrina voice server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log('Email relay running on', PORT));
