@@ -1,62 +1,41 @@
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
-const helmet = require('helmet');                 // NEW
-const rateLimit = require('express-rate-limit');  // NEW
 
 const {
   SMTP_HOST = 'smtp.titan.email',
-  SMTP_PORT = '587',
-  SMTP_SECURE = 'false',
+  SMTP_PORT = '587',          // 587 = STARTTLS, 465 = SSL
+  SMTP_SECURE = 'false',      // "false" for 587, "true" for 465
   SMTP_USER,
   SMTP_PASS,
   FROM_EMAIL,
   API_KEY
 } = process.env;
 
+// stop if missing critical env vars
 if (!SMTP_USER || !SMTP_PASS || !FROM_EMAIL || !API_KEY) {
-  console.error('Missing required environment vars: SMTP_USER, SMTP_PASS, FROM_EMAIL, API_KEY');
+  console.error('Missing required environment vars');
   process.exit(1);
 }
 
 const app = express();
-app.use(helmet()); // security headers
+app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
-// global rate limit: 100 requests per 10 minutes per IP
-const limiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-app.use(limiter);
-
-// tightened CORS (only VF + your site allowed)
-const allowed = [
-  'https://creator.voiceflow.com',
-  'https://general-runtime.voiceflow.com',
-  'https://healthy4information.com'
-];
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowed.includes(origin)) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'));
-  }
-}));
-
-// auth middleware
+// API key auth
 app.use((req, res, next) => {
   const key = req.header('x-api-key');
   if (!key || key !== API_KEY) return res.status(401).json({ error: 'Unauthorized' });
   next();
 });
 
+// configure transporter
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
   port: Number(SMTP_PORT),
-  secure: SMTP_SECURE === 'true',
-  auth: { user: SMTP_USER, pass: SMTP_PASS }
+  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true = 465
+  auth: { user: SMTP_USER, pass: SMTP_PASS },
+  requireTLS: String(SMTP_SECURE).toLowerCase() !== 'true' // STARTTLS if not using SSL
 });
 
 app.post('/send-email', async (req, res) => {
@@ -82,14 +61,8 @@ app.post('/send-email', async (req, res) => {
   }
 });
 
-// hide root (don’t advertise)
-app.get('/', (_req, res) => res.status(404).end());
-
-// log requests
-app.use((req, _res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.ip} ${req.method} ${req.path}`);
-  next();
-});
+// health check endpoint
+app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Email relay running on', PORT));
