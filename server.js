@@ -4,8 +4,8 @@ const nodemailer = require('nodemailer');
 
 const {
   SMTP_HOST = 'smtp.titan.email',
-  SMTP_PORT = '587',          // 587 = STARTTLS, 465 = SSL
-  SMTP_SECURE = 'false',      // "false" for 587, "true" for 465
+  SMTP_PORT = '465',          // Titan works best with SSL on 465
+  SMTP_SECURE = 'true',       // "true" for SSL (465)
   SMTP_USER,
   SMTP_PASS,
   FROM_EMAIL,
@@ -33,10 +33,10 @@ app.use((req, res, next) => {
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
   port: Number(SMTP_PORT),
-  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true = 465 (implicit SSL)
+  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true -> SSL
   auth: { user: SMTP_USER, pass: SMTP_PASS },
-  // require STARTTLS when not using implicit SSL
-  requireTLS: String(SMTP_SECURE).toLowerCase() !== 'true'
+  authMethod: 'LOGIN',                 // Titan prefers LOGIN
+  tls: { minVersion: 'TLSv1.2' }       // enforce modern TLS
 });
 
 app.post('/send-email', async (req, res) => {
@@ -47,7 +47,7 @@ app.post('/send-email', async (req, res) => {
     }
 
     const info = await transporter.sendMail({
-      from: FROM_EMAIL,   // must be the authenticated mailbox on Titan
+      from: FROM_EMAIL,   // must match the authenticated mailbox on Titan
       to,
       subject,
       text: text || undefined,
@@ -58,7 +58,6 @@ app.post('/send-email', async (req, res) => {
     return res.json({ ok: true, messageId: info.messageId });
   } catch (err) {
     console.error('Email send failed:', err);
-    // return the real SMTP error so we can diagnose quickly
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
