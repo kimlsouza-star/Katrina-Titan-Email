@@ -14,7 +14,7 @@ const {
 
 // stop if missing critical env vars
 if (!SMTP_USER || !SMTP_PASS || !FROM_EMAIL || !API_KEY) {
-  console.error('Missing required environment vars');
+  console.error('Missing required environment vars: SMTP_USER, SMTP_PASS, FROM_EMAIL, API_KEY');
   process.exit(1);
 }
 
@@ -33,9 +33,10 @@ app.use((req, res, next) => {
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
   port: Number(SMTP_PORT),
-  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true = 465
+  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true = 465 (implicit SSL)
   auth: { user: SMTP_USER, pass: SMTP_PASS },
-  requireTLS: String(SMTP_SECURE).toLowerCase() !== 'true' // STARTTLS if not using SSL
+  // require STARTTLS when not using implicit SSL
+  requireTLS: String(SMTP_SECURE).toLowerCase() !== 'true'
 });
 
 app.post('/send-email', async (req, res) => {
@@ -46,7 +47,7 @@ app.post('/send-email', async (req, res) => {
     }
 
     const info = await transporter.sendMail({
-      from: FROM_EMAIL,
+      from: FROM_EMAIL,   // must be the authenticated mailbox on Titan
       to,
       subject,
       text: text || undefined,
@@ -57,11 +58,12 @@ app.post('/send-email', async (req, res) => {
     return res.json({ ok: true, messageId: info.messageId });
   } catch (err) {
     console.error('Email send failed:', err);
-    return res.status(500).json({ ok: false, error: 'SEND_FAILED' });
+    // return the real SMTP error so we can diagnose quickly
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// health check endpoint
+// simple health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3000;
