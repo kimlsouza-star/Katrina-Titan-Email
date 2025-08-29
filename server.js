@@ -4,19 +4,24 @@ const nodemailer = require('nodemailer');
 
 const {
   SMTP_HOST = 'smtp.titan.email',
-  SMTP_PORT = '465',          // Titan works best with SSL on 465
-  SMTP_SECURE = 'true',       // "true" for SSL (465)
+  SMTP_PORT = '465',            // use SSL first
+  SMTP_SECURE = 'true',         // SSL on 465
   SMTP_USER,
   SMTP_PASS,
   FROM_EMAIL,
   API_KEY
 } = process.env;
 
-// stop if missing critical env vars
+// hard-stop if required envs missing
 if (!SMTP_USER || !SMTP_PASS || !FROM_EMAIL || !API_KEY) {
   console.error('Missing required environment vars: SMTP_USER, SMTP_PASS, FROM_EMAIL, API_KEY');
   process.exit(1);
 }
+
+// Safety: trim hidden whitespace from env vars
+const SMTP_USER_CLEAN = String(SMTP_USER).trim();
+const SMTP_PASS_CLEAN = String(SMTP_PASS).trim();
+const FROM_EMAIL_CLEAN = String(FROM_EMAIL).trim();
 
 const app = express();
 app.use(cors());
@@ -29,15 +34,32 @@ app.use((req, res, next) => {
   next();
 });
 
-// configure transporter
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: Number(SMTP_PORT),
-  secure: String(SMTP_SECURE).toLowerCase() === 'true', // true -> SSL
-  auth: { user: SMTP_USER, pass: SMTP_PASS },
-  authMethod: 'LOGIN',                 // Titan prefers LOGIN
-  tls: { minVersion: 'TLSv1.2' }       // enforce modern TLS
-});
+// Build transporter (authMethod PLAIN + modern TLS)
+function makeTransport({ port, secure }) {
+  return nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(port),
+    secure: !!secure,
+    auth: { user: SMTP_USER_CLEAN, pass: SMTP_PASS_CLEAN },
+    authMethod: 'PLAIN',
+    tls: { minVersion: 'TLSv1.2' }
+  });
+}
+
+// Try primary setting first (465/SSL). If 535, fall back to 587/STARTTLS automatically.
+async function sendMailWithFallback(mailOptions) {
+  const primary = makeTransport({ port: SMTP_PORT, secure: String(SMTP_SECURE).toLowerCase() === 'true' });
+  try {
+    return await primary.sendMail(mailOptions);
+  } catch (err) {
+    // If it’s an auth error (535), try the other common profile
+    if (String(err && err.message).includes('535')) {
+      const fallback = makeTransport({ port: 587, secure: false });
+      return await fallback.sendMail(mailOptions);
+    }
+    throw err;
+  }
+}
 
 app.post('/send-email', async (req, res) => {
   try {
@@ -46,8 +68,8 @@ app.post('/send-email', async (req, res) => {
       return res.status(400).json({ error: 'to, subject, and text or html are required' });
     }
 
-    const info = await transporter.sendMail({
-      from: FROM_EMAIL,   // must match the authenticated mailbox on Titan
+    const info = await sendMailWithFallback({
+      from: FROM_EMAIL_CLEAN,  // must match the authenticated mailbox
       to,
       subject,
       text: text || undefined,
@@ -58,11 +80,10 @@ app.post('/send-email', async (req, res) => {
     return res.json({ ok: true, messageId: info.messageId });
   } catch (err) {
     console.error('Email send failed:', err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });
 
-// simple health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 3000;
